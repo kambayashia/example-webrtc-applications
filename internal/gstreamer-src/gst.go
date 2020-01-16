@@ -9,6 +9,7 @@ package gst
 import "C"
 import (
 	"fmt"
+	webm_saver "github.com/pion/example-webrtc-applications/internal/webm-saver"
 	"sync"
 	"unsafe"
 
@@ -27,6 +28,7 @@ type Pipeline struct {
 	id        int
 	codecName string
 	clockRate float32
+	saver *webm_saver.WebmSaver
 }
 
 var pipelines = make(map[int]*Pipeline)
@@ -39,7 +41,7 @@ const (
 )
 
 // CreatePipeline creates a GStreamer Pipeline
-func CreatePipeline(codecName string, tracks []*webrtc.Track, pipelineSrc string) *Pipeline {
+func CreatePipeline(codecName string, saver *webm_saver.WebmSaver, tracks []*webrtc.Track, pipelineSrc string) *Pipeline {
 	pipelineStr := "appsink name=appsink"
 	var clockRate float32
 
@@ -88,6 +90,7 @@ func CreatePipeline(codecName string, tracks []*webrtc.Track, pipelineSrc string
 		id:        len(pipelines),
 		codecName: codecName,
 		clockRate: clockRate,
+		saver: saver,
 	}
 
 	pipelines[pipeline.id] = pipeline
@@ -112,10 +115,14 @@ func goHandlePipelineBuffer(buffer unsafe.Pointer, bufferLen C.int, duration C.i
 
 	if ok {
 		samples := uint32(pipeline.clockRate * (float32(duration) / 1000000000))
+		sample := media.Sample{Data: C.GoBytes(buffer, bufferLen), Samples: samples}
 		for _, t := range pipeline.tracks {
-			if err := t.WriteSample(media.Sample{Data: C.GoBytes(buffer, bufferLen), Samples: samples}); err != nil {
+			if err := t.WriteSample(sample); err != nil {
 				panic(err)
 			}
+		}
+		if err := pipeline.saver.WriteSample(sample); err != nil {
+			panic(err)
 		}
 	} else {
 		fmt.Printf("discarding buffer, no pipeline with id %d", int(pipelineID))
